@@ -1,0 +1,117 @@
+version: '3.8'
+
+services:
+  ping-monitor:
+    build: .
+    container_name: ping-monitor
+    restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=America/Sao_Paulo
+      - MONITOR_HOST=${MONITOR_HOST:-8.8.8.8}
+      - PING_INTERVAL=${PING_INTERVAL:-1}
+      - MAX_FAILURES=${MAX_FAILURES:-3}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+      - WEBHOOK_URL=${WEBHOOK_URL:-}
+      - WHATSAPP_API_URL=${WHATSAPP_API_URL:-http://evolution-api:8080}
+      - WHATSAPP_API_KEY=${WHATSAPP_API_KEY:-}
+      - WHATSAPP_INSTANCE=${WHATSAPP_INSTANCE:-ping-monitor}
+      - WHATSAPP_NUMBER=${WHATSAPP_NUMBER:-}
+    volumes:
+      - ./logs:/app/logs
+      - ./config:/app/config
+    networks:
+      - ping-monitor-network
+    depends_on:
+      - evolution-api
+    healthcheck:
+      test: ["CMD", "python", "test_script.py", "--quick"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  evolution-api:
+    image: atendai/evolution-api:v2.0.0
+    container_name: evolution-api
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - SERVER_TYPE=http
+      - SERVER_PORT=8080
+      - CORS_ORIGIN=*
+      - CORS_METHODS=GET,POST,PUT,DELETE
+      - CORS_CREDENTIALS=true
+      - LOG_LEVEL=ERROR
+      - LOG_COLOR=false
+      - LOG_BAILEYS=false
+      - DEL_INSTANCE=false
+      - DATABASE_ENABLED=true
+      - DATABASE_CONNECTION_URI=mongodb://root:${MONGODB_PASSWORD:-evolution123}@mongodb:27017/?authSource=admin
+      - DATABASE_CONNECTION_DB_PREFIX_NAME=evolution
+      - REDIS_ENABLED=true
+      - REDIS_URI=redis://redis:6379
+      - REDIS_PREFIX_KEY=evolution
+      - AUTHENTICATION_TYPE=apikey
+      - AUTHENTICATION_API_KEY=${EVOLUTION_API_KEY:-B6D711FCDE4D4FD5936544120E713976}
+      - AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES=true
+      - LANGUAGE=pt-BR
+      - QRCODE_LIMIT=30
+    volumes:
+      - evolution_instances:/evolution/instances
+      - evolution_store:/evolution/store
+    networks:
+      - ping-monitor-network
+    depends_on:
+      - mongodb
+      - redis
+
+  mongodb:
+    image: mongo:6.0.5
+    container_name: mongodb
+    restart: unless-stopped
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=root
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGODB_PASSWORD:-evolution123}
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - ping-monitor-network
+
+  redis:
+    image: redis:7.0.10-alpine
+    container_name: redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --replica-read-only no --requirepass ${REDIS_PASSWORD:-redis123}
+    volumes:
+      - redis_data:/data
+    networks:
+      - ping-monitor-network
+
+  # Opcional: Interface web para monitoramento
+  web-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    container_name: ping-monitor-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - API_URL=http://evolution-api:8080
+    networks:
+      - ping-monitor-network
+    depends_on:
+      - ping-monitor
+
+networks:
+  ping-monitor-network:
+    driver: bridge
+
+volumes:
+  evolution_instances:
+  evolution_store:
+  mongodb_data:
+  redis_data:
